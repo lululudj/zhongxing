@@ -9,11 +9,69 @@ Author: Hermes Agent @ CTO 指令
 import math
 import random
 import os
+import logging
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from dataclasses import dataclass, field
 from typing import Optional
 
 from .models import Crystal, COLOR_MAP
+
+logger = logging.getLogger("zhongxing")
+
+
+def _find_fonts() -> dict[str, Optional[str]]:
+    """
+    跨平台字体检测。支持 Windows / Linux / macOS。
+    Returns: {name: absolute_path} 映射
+    """
+    candidates = []
+    
+    # Windows
+    win_fonts = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    candidates.extend([
+        (win_fonts, "msyh.ttc"),      # 微软雅黑
+        (win_fonts, "msyhbd.ttc"),    # 微软雅黑 Bold
+        (win_fonts, "simhei.ttf"),    # 黑体
+        (win_fonts, "simsun.ttc"),    # 宋体
+        (win_fonts, "STXINGKA.TTF"),  # 华文行楷
+        (win_fonts, "STHUPO.TTF"),    # 华文琥珀
+        (win_fonts, "DENG.TTF"),      # 等线
+        (win_fonts, "DENGLB.TTF"),    # 等线 Light Bold
+        (win_fonts, "arial.ttf"),
+        (win_fonts, "arialbd.ttf"),
+        (win_fonts, "ARLRDBD.TTF"),
+    ])
+    
+    # Linux 常见路径
+    candidates.extend([
+        ("/usr/share/fonts", "truetype/dejavu/DejaVuSans.ttf"),
+        ("/usr/share/fonts", "truetype/noto/NotoSansCJK-Regular.ttc"),
+        ("/usr/share/fonts", "opentype/noto/NotoSansCJK-Regular.ttc"),
+        ("/usr/share/fonts", "noto-cjk/NotoSansCJK-Regular.ttc"),
+    ])
+    
+    # macOS
+    candidates.extend([
+        ("/System/Library/Fonts", "STHeiti Medium.ttc"),
+        ("/System/Library/Fonts", "PingFang.ttc"),
+        ("/Library/Fonts", "Arial.ttf"),
+    ])
+    
+    found = {}
+    for directory, filename in candidates:
+        path = os.path.join(directory, filename)
+        if os.path.exists(path):
+            name = Path(filename).stem.lower()
+            if name not in found:  # 保留第一个找到的
+                found[name] = path
+    
+    if not found:
+        logger.warning("未找到任何系统字体，将使用 PIL 默认字体")
+        found["default"] = None
+    
+    logger.info(f"检测到字体: {', '.join(found.keys())}")
+    return found
 
 
 class CrystalRenderer:
@@ -24,48 +82,14 @@ class CrystalRenderer:
     支持中英文混排，自动检测系统可用中文字体。
     """
 
-    # 候选字体路径（Windows 常见路径）
-    _FONT_CANDIDATES = [
-        # 中文优先
-        "/c/Windows/Fonts/msyh.ttc",          # 微软雅黑
-        "/c/Windows/Fonts/msyhbd.ttc",        # 微软雅黑 Bold
-        "/c/Windows/Fonts/simhei.ttf",        # 黑体
-        "/c/Windows/Fonts/simsun.ttc",        # 宋体
-        "/c/Windows/Fonts/STXINGKA.TTF",      # 华文行楷
-        "/c/Windows/Fonts/STHUPO.TTF",        # 华文琥珀
-        "/c/Windows/Fonts/DENG.TTF",          # 等线
-        "/c/Windows/Fonts/DENGLB.TTF",        # 等线 Light Bold
-        # 英文 fallback
-        "/c/Windows/Fonts/arial.ttf",
-        "/c/Windows/Fonts/arialbd.ttf",
-        "/c/Windows/Fonts/ARLRDBD.TTF",
-    ]
-
     def __init__(self, width: int = 1920, height: int = 1080, bg_color="#0a0a1a"):
         self.width = width
         self.height = height
         self.bg_color = bg_color
         self.img = Image.new("RGBA", (width, height), bg_color)
         self.draw = ImageDraw.Draw(self.img)
-        # 自动检测可用字体
         self._fonts = {}
-        self._detected_fonts = self._detect_fonts()
-
-    def _detect_fonts(self) -> dict:
-        """扫描系统字体，返回 {name: path} 映射"""
-        found = {}
-        for fp in self._FONT_CANDIDATES:
-            name = os.path.basename(fp).split(".")[0]
-            if os.path.exists(fp):
-                found[name] = fp
-        if not found:
-            # 实在找不到就用默认
-            found["default"] = None
-        return found
-
-    def _list_available_fonts(self) -> str:
-        """列出找到的字体（调试用）"""
-        return ", ".join(self._detected_fonts.keys())
+        self._detected_fonts = _find_fonts()
 
     def _get_font(self, size: int, bold: bool = False) -> ImageFont:
         """获取指定大小的字体，优先用中文粗体"""
@@ -73,28 +97,28 @@ class CrystalRenderer:
         if key in self._fonts:
             return self._fonts[key]
 
-        # 优先选择
-        if bold:
-            preferred = ["msyhbd", "arialbd", "denlgb"]
-        else:
-            preferred = ["msyh", "simhei", "arial", "deng"]
+        preferred = (
+            ["msyhbd", "arialbd", "denlgb"] if bold
+            else ["msyh", "simhei", "arial", "deng"]
+        )
 
         for name in preferred:
             if name in self._detected_fonts:
                 path = self._detected_fonts[name]
+                if path is None:
+                    continue
                 try:
                     f = ImageFont.truetype(path, size)
                     self._fonts[key] = f
                     return f
-                except (IOError, OSError):
+                except (IOError, OSError) as e:
+                    logger.debug(f"字体加载失败 [{name}]: {e}")
                     continue
 
         # fallback: 用第一个可用字体
         for name, path in self._detected_fonts.items():
-            if name == "default":
-                f = ImageFont.load_default()
-                self._fonts[key] = f
-                return f
+            if path is None:
+                continue
             try:
                 f = ImageFont.truetype(path, size)
                 self._fonts[key] = f
@@ -102,6 +126,7 @@ class CrystalRenderer:
             except (IOError, OSError):
                 continue
 
+        logger.warning(f"所有字体加载失败，使用默认字体 (size={size})")
         f = ImageFont.load_default()
         self._fonts[key] = f
         return f
@@ -166,15 +191,10 @@ class CrystalRenderer:
         py = int(self.height * c.y_ratio - th / 2)
 
         # 景深参数 — 机机视觉压缩协议的Z轴编码
-        # 4个深度层级必须在视觉上可区分，让llava通过清晰度感知重要性
-        # Tier1 (Z<0.25): 核心层 — 清晰锐利
-        # Tier2 (Z 0.25~0.5): 重要层 — 轻微柔化
-        # Tier3 (Z 0.5~0.85): 中间层 — 明显模糊+阴影
-        # Tier4 (Z>0.85): 背景层 — 高度模糊，仅余轮廓
-        alpha = max(40, int(255 * (1 - c.depth * 0.75)))  # 更激进衰减: 背景只剩40
-        blur_r = max(0, int(c.depth * 7))                  # 更多模糊: 最深7px高斯
-        shadow_offset = int(3 + c.depth * 18)               # 阴影更长: 最深21px偏移
-        shadow_alpha = max(15, int(100 * (1 - c.depth * 0.7)))  # 阴影也逐层变淡
+        alpha = max(40, int(255 * (1 - c.depth * 0.75)))
+        blur_r = max(0, int(c.depth * 7))
+        shadow_offset = int(3 + c.depth * 18)
+        shadow_alpha = max(15, int(100 * (1 - c.depth * 0.7)))
 
         pad = shadow_offset + blur_r + 20
         lw, lh = tw + pad * 2, th + pad * 2
@@ -276,11 +296,16 @@ class CrystalRenderer:
         """
         渲染全部晶体到一张图片
         """
+        if not crystals:
+            logger.warning("传入空晶体列表，返回空白图")
+            return self.img
+
         self._draw_background()
         self._draw_particles(particle_count)
         if data_streams:
             self._draw_data_streams()
-        # 4. 逐层渲染 — 按深度排序，远→近
+        
+        # 逐层渲染 — 按深度排序，远→近
         for c in sorted(crystals, key=lambda x: x.depth):
             layer, px, py = self._render_crystal(c, base_font_size)
             font = self._get_font(max(14, int(base_font_size * (0.3 + c.weight * 0.9))),

@@ -27,11 +27,21 @@ import sys
 import os
 import json
 import argparse
+import logging
 
 # 加入项目路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core import CrystalRenderer, TextFolder
+from utils import extract_word_freq, format_status
+
+# ── 日志配置 ──
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("zhongxing.cli")
 
 
 def main():
@@ -85,10 +95,12 @@ def main():
         text = args.direct
     elif args.file:
         if not os.path.exists(args.file):
+            logger.error(f"文件不存在: {args.file}")
             print(f"❌ 文件不存在: {args.file}")
             sys.exit(1)
         with open(args.file, "r", encoding=args.encoding) as f:
             text = f.read()
+        logger.info(f"读取文件: {args.file} ({len(text)} 字符)")
     else:
         # 从 stdin 读取
         print("📄 请在下面粘贴文本（Ctrl+Z / Ctrl+D 结束）：")
@@ -99,6 +111,7 @@ def main():
             sys.exit(0)
 
     if not text.strip():
+        logger.error("未读取到文本内容")
         print("❌ 未读取到文本内容")
         sys.exit(1)
 
@@ -112,17 +125,17 @@ def main():
     )
 
     if not crystals:
+        logger.error("未能从文本中提取到有效信息块")
         print("❌ 未能从文本中提取到有效信息块")
         sys.exit(1)
 
     print(f"   → 提取 {len(crystals)} 个晶体")
+    print(f"   → {format_status(crystals)}")
 
-    # 统计分类
-    cats = {}
-    for c in crystals:
-        cats[c.category] = cats.get(c.category, 0) + 1
-    cat_desc = " | ".join(f"{k}: {v}" for k, v in sorted(cats.items()))
-    print(f"   → 分类: {cat_desc}")
+    # 词频统计
+    word_freq = extract_word_freq(text, top_n=10)
+    if word_freq:
+        print(f"   → 高频词: {', '.join(f'{w}({c})' for w, c in word_freq[:5])}")
 
     # ── 渲染 ──
     print(f"🎨 渲染 2.5D 晶体图... ({args.width}x{args.height})")
@@ -145,6 +158,7 @@ def main():
     img.save(output_path)
     print(f"✅ 晶体图已保存: {output_path}")
     print(f"   尺寸: {img.width} × {img.height}")
+    logger.info(f"晶体图已保存: {output_path}")
 
     # JSON 输出
     if args.json:
@@ -163,10 +177,12 @@ def main():
                 }
                 for c in crystals
             ],
+            "word_freq": dict(word_freq),
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         print(f"   JSON 数据: {json_path}")
+        logger.info(f"JSON 已保存: {json_path}")
 
     # 打开图片
     if args.show:
@@ -174,8 +190,8 @@ def main():
             import subprocess
             subprocess.Popen(["start", output_path], shell=True)
             print("   🖼️  图片已打开")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"打开图片失败: {e}")
 
     print("✨ 众星折叠完成！")
 

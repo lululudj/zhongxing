@@ -5,9 +5,15 @@
 文字通道: hermes3 GPU ~2.8s  |  视觉通道: llava:7b GPU ~19s
 智能路由: 规则引擎 0.001s     |  模型热切换: 按需装卸
 """
-import sys, os, re, time, json
+import sys
+import os
+import time
+import logging
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gradio as gr, ollama
+
+import gradio as gr
+import ollama
 from core import CrystalRenderer, TextFolder
 from config import (
     TEXT_CHANNEL_MODEL, VISUAL_CHANNEL_MODEL,
@@ -15,113 +21,72 @@ from config import (
     MAX_CHUNKS, RENDER_WIDTH, RENDER_HEIGHT, RENDER_FONT_SIZE,
     OUTPUT_DIR, CRYSTAL_IMAGE_PATH, GRADIO_HOST, GRADIO_PORT, GRADIO_SHARE,
 )
+from utils import (
+    extract_word_freq, extract_targets, count_in_text,
+    route, switch_model, ollama_chat_with_retry, format_crystal_text, format_status,
+)
 from PIL import Image, ImageDraw
 
+# ── 日志配置 ──
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("zhongxing.gradio")
+
+# ── 会话状态 ──
 _session_raw = ""
 _session_crystal = ""
 _crystal_image_path = ""
-
-def route(question: str) -> str:
-    """规则路由器：0.001s 判断问题类型"""
-    visual_kw = ["图","晶体","彩色","空间","分布","拓扑","阵营","画","视觉","看图","读取","这张"]
-    count_kw = ["几次","多少个","出现","提到","次数","频次","统计","多少","TOP","频率","计数"]
-    if any(k in question for k in visual_kw):
-        return "VISUAL"
-    if any(k in question for k in count_kw):
-        return "TEXT"
-    return "TEXT"
-
-def switch_model(target: str):
-    """热切换 GPU 模型（先卸载当前，再加载目标）"""
-    try:
-        # 卸载当前 GPU 模型
-        ps = ollama.list()
-        for m in ps.get("models", []):
-            name = m.get("name","")
-            if name in (f"{_TEXT_CHANNEL}:latest", f"{_VISUAL_CHANNEL}:latest"):
-                try:
-                    ollama.chat(model=name, messages=[{"role":"user","content":"bye"}],
-                               options={"num_predict":1, "num_gpu":OLLAMA_GPU_LAYERS})
-                except: pass
-        # 预热目标模型
-        ollama.chat(model=target, messages=[{"role":"user","content":"ok"}],
-                   options={"num_predict":5, "num_gpu":OLLAMA_GPU_LAYERS})
-    except:
-        pass
 
 _TEXT_CHANNEL = TEXT_CHANNEL_MODEL
 _VISUAL_CHANNEL = VISUAL_CHANNEL_MODEL
 _current_gpu_model = None
 
+
 def fold_and_render(text, title, subtitle):
     global _session_raw, _session_crystal, _crystal_image_path, _current_gpu_model
 
     if not text.strip():
-        img = Image.new("RGBA",(800,400),(10,10,30,255))
-        d=ImageDraw.Draw(img); d.text((150,180),"请粘贴文本",fill=(100,160,200,200))
-        return img,""
+        img = Image.new("RGBA", (800, 400), (10, 10, 30, 255))
+        d = ImageDraw.Draw(img)
+        d.text((150, 180), "请粘贴文本", fill=(100, 160, 200, 200))
+        return img, ""
 
     _session_raw = text
     folder = TextFolder(max_chunks=MAX_CHUNKS)
     crystals, rt, rs = folder.fold(text, title=title, subtitle=subtitle)
     if not crystals:
-        img = Image.new("RGBA",(800,400),(10,10,30,255))
-        d=ImageDraw.Draw(img); d.text((150,180),"未能提取",fill=(200,80,80,200))
-        return img,""
+        img = Image.new("RGBA", (800, 400), (10, 10, 30, 255))
+        d = ImageDraw.Draw(img)
+        d.text((150, 180), "未能提取", fill=(200, 80, 80, 200))
+        return img, ""
 
-    # 词频 — 重叠滑动窗口提取2字中文词，覆盖所有人名/关键词
-    from collections import Counter
-    freq = Counter()
-    # 使用重叠窗口：如"的萧炎" → 提取"的萧"+"萧炎"，不会漏掉人名
-    chars = list(text)
-    for i in range(len(chars) - 1):
-        w = chars[i] + chars[i+1]
-        if '\u4e00' <= w[0] <= '\u9fff' and '\u4e00' <= w[1] <= '\u9fff':
-            freq[w] += 1
-    stops = set("的了是在不我他有这也为之就都而及与么然但所那可以一个上下来去说知道")
-    top = [(w,c) for w,c in freq.most_common(30) if w not in stops][:20]
-
-    # Z轴深度分层
-    def _z_tier(d): 
-        if d < 0.25: return "🔴核心层"
-        if d < 0.5:  return "🟡重要层"
-        if d < 0.85: return "🟠中间层"
-        return "⚫背景层"
-    depth_groups = {}
-    for c in crystals:
-        tier = _z_tier(c.depth)
-        depth_groups.setdefault(tier, []).append(c)
-    
-    depth_sections = []
-    for tier in ["🔴核心层","🟡重要层","🟠中间层","⚫背景层"]:
-        if tier in depth_groups:
-            items = depth_groups[tier]
-            depth_sections.append(f"\n### {tier} (Z深度 {items[0].depth:.2f}~{items[-1].depth:.2f}) ###")
-            depth_sections.extend(f"  [{c.category}] (depth={c.depth:.2f}) {c.text[:60]}" for c in items)
-
-    _session_crystal = (
-        "【词频 Top20（精确）】\n" +
-        "\n".join(f"  「{w}」= {c}次" for w,c in top) +
-        "\n\n【晶体Z轴深度分层 ("+str(len(crystals))+f"个晶体)】\n" +
-        "注意：depth 越小越重要 — 核心层depth<0.25，重要层0.25~0.5，中间层0.5~0.85，背景层>0.85" +
-        "\n".join(depth_sections)
-    )
+    # 词频统计
+    word_freq = extract_word_freq(text, top_n=20)
+    _session_crystal = format_crystal_text(crystals, word_freq)
 
     # 渲染晶体图
     renderer = CrystalRenderer(width=RENDER_WIDTH, height=RENDER_HEIGHT)
-    img = renderer.render(crystals, title=rt or title, subtitle=rs or subtitle, base_font_size=RENDER_FONT_SIZE)
+    img = renderer.render(
+        crystals,
+        title=rt or title,
+        subtitle=rs or subtitle,
+        base_font_size=RENDER_FONT_SIZE,
+    )
     _crystal_image_path = CRYSTAL_IMAGE_PATH
     os.makedirs(os.path.dirname(_crystal_image_path), exist_ok=True)
     img.save(_crystal_image_path)
+    logger.info(f"晶体图已保存: {_crystal_image_path}")
 
     # 预热文字通道
     if _current_gpu_model != _TEXT_CHANNEL:
-        switch_model(_TEXT_CHANNEL)
-        _current_gpu_model = _TEXT_CHANNEL
+        if switch_model(_TEXT_CHANNEL, OLLAMA_GPU_LAYERS):
+            _current_gpu_model = _TEXT_CHANNEL
 
-    cats = {}
-    for c in crystals: cats[c.category] = cats.get(c.category,0)+1
-    return img, f"✅ {len(crystals)}晶体 | " + " ".join(f"{k}:{v}" for k,v in sorted(cats.items()))
+    return img, format_status(crystals)
+
 
 VISUAL_PROTOCOL_PROMPT = """你是众星大脑的视觉解码器。这张2.5D晶体图是机机视觉压缩协议——图中的每一个视觉属性都携带精确的语义信息：
 
@@ -156,10 +121,13 @@ VISUAL_PROTOCOL_PROMPT = """你是众星大脑的视觉解码器。这张2.5D晶
 3. 回答时引用原图中看到的数字，不要猜测
 4. 如果你不确定某条信息的类别，根据其清晰度和位置来判断"""
 
+
 def dual_channel_infer(question):
     global _current_gpu_model, _crystal_image_path
-    if not question.strip(): return "⚠️ 请输入问题"
-    if not _session_crystal: return "⚠️ 请先在「折叠渲染」生成晶体"
+    if not question.strip():
+        return "⚠️ 请输入问题"
+    if not _session_crystal:
+        return "⚠️ 请先在「折叠渲染」生成晶体"
 
     channel = route(question)
     t0 = time.time()
@@ -170,56 +138,78 @@ def dual_channel_infer(question):
 
         # 切换到视觉模型
         if _current_gpu_model != _VISUAL_CHANNEL:
-            switch_model(_VISUAL_CHANNEL)
+            if not switch_model(_VISUAL_CHANNEL, OLLAMA_GPU_LAYERS):
+                return "❌ 视觉模型加载失败"
             _current_gpu_model = _VISUAL_CHANNEL
 
-        resp = ollama.chat(model=_VISUAL_CHANNEL, messages=[
-            {"role":"system","content": VISUAL_PROTOCOL_PROMPT},
-            {"role":"user","content": question, "images": [_crystal_image_path]},
-        ], options={"num_gpu":OLLAMA_GPU_LAYERS,"temperature":OLLAMA_TEMPERATURE,"num_predict":OLLAMA_NUM_PREDICT})
-
-        elapsed = time.time() - t0
-        return f"🎨 视觉通道 ({_VISUAL_CHANNEL} · {elapsed:.1f}s)\n\n{resp['message']['content']}"
+        try:
+            resp = ollama.chat(
+                model=_VISUAL_CHANNEL,
+                messages=[
+                    {"role": "system", "content": VISUAL_PROTOCOL_PROMPT},
+                    {"role": "user", "content": question, "images": [_crystal_image_path]},
+                ],
+                options={
+                    "num_gpu": OLLAMA_GPU_LAYERS,
+                    "temperature": OLLAMA_TEMPERATURE,
+                    "num_predict": OLLAMA_NUM_PREDICT,
+                },
+            )
+            elapsed = time.time() - t0
+            return f"🎨 视觉通道 ({_VISUAL_CHANNEL} · {elapsed:.1f}s)\n\n{resp['message']['content']}"
+        except Exception as e:
+            logger.error(f"视觉通道推理失败: {e}")
+            return f"❌ 视觉通道推理失败: {e}"
 
     else:
-        # 文字通道 — 直接注入精确词频
+        # 文字通道
         if _current_gpu_model != _TEXT_CHANNEL:
-            switch_model(_TEXT_CHANNEL)
+            if not switch_model(_TEXT_CHANNEL, OLLAMA_GPU_LAYERS):
+                return "❌ 文字模型加载失败"
             _current_gpu_model = _TEXT_CHANNEL
 
-        # 检测次数类问题 → Python 精确计数
-        # 滑动窗口提取所有2-4字中文词 + 完整中文短语（解决"花花更新"类组合词）
+        # 精确计数
         extra = ""
-        targets = set()
-        # 1. 滑动窗口：2-4字单/双词（覆盖人名、关键词）
-        for i in range(len(question)):
-            for l in [2, 3, 4]:
-                w = question[i:i+l]
-                if len(w) == l and all('\u4e00' <= c <= '\u9fff' for c in w):
-                    targets.add(w)
-        # 2. 完整中文短语：连续中文字符段（覆盖多词组合如"花花更新"）
-        for phrase in re.findall(r'[\u4e00-\u9fff]{2,}', question):
-            targets.add(phrase)
+        targets = extract_targets(question)
         if targets and _session_raw:
-            counts = []
-            for t in set(targets):
-                c = len(re.findall(re.escape(t), _session_raw))
-                if c >= 1:
-                    counts.append(f"「{t}」= {c}次")
+            counts = count_in_text(_session_raw, targets)
             if counts:
-                extra = "\n【硬数据 — 原文精确搜索】\n" + "\n".join(counts[:10])
+                extra = "\n【硬数据 — 原文精确搜索】\n" + "\n".join(
+                    f"「{t}」= {c}次" for t, c in list(counts.items())[:10]
+                )
 
-        prompt = f"晶体数据(按深度分层):\n{_session_crystal[:3000]}\n{extra}\n\n问题:{question}\n\n注意：硬数据中的数字必须原样引用。depth值越小=越重要，核心层(depth<0.25)的信息优先级最高。不要猜测数字。"
-        resp = ollama.chat(model=_TEXT_CHANNEL, messages=[
-            {"role":"system","content":"精准推理。晶体数据按Z轴深度分层：核心层=最关键信息，背景层=辅助上下文。优先基于核心层数据回答。硬数据的数字必须引用，不要猜测。"},
-            {"role":"user","content": prompt},
-        ], options={"num_gpu":OLLAMA_GPU_LAYERS,"temperature":OLLAMA_TEMPERATURE,"num_predict":OLLAMA_NUM_PREDICT})
+        prompt = (
+            f"晶体数据(按深度分层):\n{_session_crystal[:3000]}\n{extra}\n\n"
+            f"问题:{question}\n\n"
+            "注意：硬数据中的数字必须原样引用。depth值越小=越重要，核心层(depth<0.25)的信息优先级最高。不要猜测数字。"
+        )
 
-        elapsed = time.time() - t0
-        return f"⚡ 文字通道 ({_TEXT_CHANNEL} · {elapsed:.1f}s)\n\n{resp['message']['content']}"
+        try:
+            content = ollama_chat_with_retry(
+                model=_TEXT_CHANNEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "精准推理。晶体数据按Z轴深度分层：核心层=最关键信息，背景层=辅助上下文。优先基于核心层数据回答。硬数据的数字必须引用，不要猜测。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                options={
+                    "num_gpu": OLLAMA_GPU_LAYERS,
+                    "temperature": OLLAMA_TEMPERATURE,
+                    "num_predict": OLLAMA_NUM_PREDICT,
+                },
+            )
+            elapsed = time.time() - t0
+            return f"⚡ 文字通道 ({_TEXT_CHANNEL} · {elapsed:.1f}s)\n\n{content}"
+        except Exception as e:
+            logger.error(f"文字通道推理失败 (已重试): {e}")
+            return f"❌ 文字通道推理失败，请检查 Ollama 是否在运行: {e}"
 
+
+# ── Gradio UI ──
 with gr.Blocks(title="⚡ 众星 V4.0 M2M协议 双通道引擎") as demo:
-    gr.Markdown("""
+    gr.Markdown(f"""
     # ⚡ 众星 (ZhongXing) V4.0 — M2M 双通道推理引擎
     **⚡ 文字通道 ({TEXT_CHANNEL_MODEL})** | **🎨 视觉通道 ({VISUAL_CHANNEL_MODEL})** | 智能路由
     """)
@@ -245,18 +235,25 @@ with gr.Blocks(title="⚡ 众星 V4.0 M2M协议 双通道引擎") as demo:
             question_input = gr.Textbox(
                 label="💬 提问",
                 placeholder="计数类：'萧炎出现了几次？'  视觉类：'请分析这张晶体图' …",
-                lines=3)
+                lines=3,
+            )
             ask_btn = gr.Button("🚀 智能推理", variant="primary", size="lg")
             answer_output = gr.Textbox(label="✨ 推理结果", lines=15)
 
-    # 事件
-    fold_btn.click(fn=fold_and_render, inputs=[text_input,title_input,subtitle_input],
-                   outputs=[output_image,status_text])
+    # 事件绑定
+    fold_btn.click(
+        fn=fold_and_render,
+        inputs=[text_input, title_input, subtitle_input],
+        outputs=[output_image, status_text],
+    )
     ask_btn.click(fn=dual_channel_infer, inputs=question_input, outputs=answer_output)
     question_input.submit(fn=dual_channel_infer, inputs=question_input, outputs=answer_output)
 
 if __name__ == "__main__":
+    logger.info(f"启动 Gradio: {GRADIO_HOST}:{GRADIO_PORT}")
     demo.launch(
-        server_name=GRADIO_HOST, server_port=GRADIO_PORT, share=GRADIO_SHARE,
-        theme=gr.themes.Soft(primary_hue="cyan",neutral_hue="slate"),
+        server_name=GRADIO_HOST,
+        server_port=GRADIO_PORT,
+        share=GRADIO_SHARE,
+        theme=gr.themes.Soft(primary_hue="cyan", neutral_hue="slate"),
     )
