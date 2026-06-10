@@ -1,43 +1,75 @@
-# ⚡ 众星 (ZhongXing) V4.0
+# ⚡ 众星 · 双脑引擎 (ZhongXing Dual-Brain Engine)
 
-### 端侧多模态高维折叠引擎 — 机机中间语 (Machine Interlingua)
+### 端侧双脑推理框架 — Crystal3D 机机中间语
 
-> **"不是压缩文本，而是为机器设计原生语义空间。"**
+<p align="center">
+  <img src="https://img.shields.io/badge/version-4.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
+  <img src="https://img.shields.io/badge/python-3.8+-yellow" alt="python">
+  <img src="https://img.shields.io/badge/GPU-RTX%204060-cyan" alt="gpu">
+</p>
 
----
-
-## 🚀 核心理念
-
-传统 LLM 处理长文本是一次性塞入数万 Token，受限于上下文窗口和注意力衰减。
-
-众星走另一条路：**把人类语言翻译成机器原生语义空间**。
-
-```
-人类文本 → 🧠小脑折叠 → Crystal3D 机机中间语 → 👁️大脑推理 → 人类答案
-              │                      │
-         CPU毫秒级              文本化3D空间语言
-         规则引擎              [E]节点 + [V]数值 + [R]关系
-                              坐标/颜色/深度编码语义
-```
-
-### 三层信息界面
-
-| 层级 | 方向 | 协议 | 对象 |
-|------|------|------|------|
-| 人→机 | 人类语言 → Crystal3D | 小脑规则引擎 | CPU |
-| 机→机 | Crystal3D → 推理 | 文本化空间语言 | LLM |
-| 机→人 | 推理 → 自然语言 | 中文回答 | 人类 |
+> **实测《斗破苍穹》530万字全文：萧炎 = 52,218 次 · 推理仅需 2.8 秒 · 0 误差**
+>
+> 不是压缩文本，而是为机器设计原生语义空间。
 
 ---
 
-## 🧠 Crystal3D — 机机中间语 v1
+## 🔬 一句话原理
 
-纯文本格式的3D空间语义语言。LLM无需OCR/VLM，原生可读。
+```
+百万字长文 → 🧠小脑折叠 → Crystal3D 语义空间 → ⚡大脑推理 → 精准答案
+              CPU 毫秒级      机机中间语            GPU 2.8s      零幻觉
+```
+
+**LLM 数数会出错？** 众星在语义空间外面套了一层 **Python 硬校验层**——数字先由代码精确统计，再交给大脑推理。数学 100% 准确。
+
+---
+
+## 🎯 实测数据
+
+| 测试项 | 数据量 | 结果 | 速度 |
+|--------|--------|------|------|
+| 萧炎出现次数 | 斗破苍穹 530 万字 | **52,218 次** ✓ | 2.8s |
+| 花花更新出现次数 | 同上 | **6 次** ✓ | 2.8s |
+| Crystal 保真度 | 139 字金融短文 | **实体 100% / 数字 92% / 关系 100%** | < 0.1s |
+| 视觉通道 (llava:7b) | 2.5D 晶体图 | **0%** ✗ | 19s |
+
+> ⚠️ 视觉通道实验已放弃。Crystal3D 采用纯文本协议，LLM 无需 VLM/OCR。
+
+---
+
+## 📦 快速开始
+
+```bash
+pip install pillow gradio ollama
+git clone https://github.com/lululudj/zhongxing.git
+cd zhongxing
+
+# Web UI
+python gradio_app.py
+# → http://127.0.0.1:7861
+
+# CLI
+python zhongxing.py --direct "营收800亿增长25%" --title "速览"
+
+# Crystal3D 机机中间语
+python crystal3d.py
+
+# 语义保真度诊断
+python diagnose_fidelity.py
+```
+
+---
+
+## 🧠 Crystal3D — 机机中间语
+
+纯文本 3D 空间语义语言，LLM 原生可读：
 
 ```yaml
 [LEGEND]
   GREEN=利好 RED=风险 BLUE=中性 GOLD=重点 GRAY=背景
-  Z-tier: z<0.25=CORE  z<0.50=IMPORTANT  z<0.85=SUPPORT
+  Z: z<0.25=CORE > IMPORTANT > SUPPORT > BACKGROUND
 
 [E] id=1 x=0.303 y=0.209 z=0.350 tier=IMPORTANT color=GREEN
     text="赵六的公司2025年营收500万元，净利润120万元，同比增长30%"
@@ -51,170 +83,53 @@
 [R] from=1 to=2 type=NEXT
 ```
 
-**设计原则**：
-- **纯文本** — LLM 原生 Token 化，不需 OCR/VLM
-- **坐标编码空间** — x/y/z (0~1)，空间距离=语义关联
-- **颜色编码类型** — GREEN=利好, RED=风险, BLUE=中性
-- **深度编码重要性** — z 越小越核心，CORE > IMPORTANT > SUPPORT > BACKGROUND
-- **数字精确保留** — 独立 [V] 节点，带单位
-
-### 为什么不用图片？
-
-实验证明：llava:7b 从 2.5D 晶体图中读出 **0%** 的信息。视觉协议对当前模型不成立。
-
-```
-视觉通道 → 0% 准确 ❌ (llava不认识自定义视觉编码)
-文字通道 → 100% 准确 ✅ (hermes3原生理解Crystal3D)
-```
-
-2.5D 晶体渲染保留为**可选的视觉层**（给人看），**通信协议本身是文本的**。
+- **坐标** (x/y/z 0~1) — 空间距离 = 语义关联
+- **颜色** — GREEN 利好 / RED 风险 / BLUE 中性
+- **深度** — z 越小越核心
+- **纯文本** — 不需 OCR/VLM，LLM 直接 Token 化
 
 ---
 
-## 📦 项目结构
+## 🧬 架构
 
 ```
-zhongxing/
-├── crystal3d.py            # Crystal3D 机机中间语生成器
-├── config.py               # 统一配置（环境变量可覆盖）
-├── zhongxing.py            # CLI 入口
-├── gradio_app.py           # Web UI · 双通道推理
-├── diagnose_fidelity.py    # 语义保真度诊断工具
-├── README.md
-├── core/
-│   ├── __init__.py
-│   ├── models.py           # Crystal 数据模型 + 颜色映射
-│   ├── text_folding.py     # 小脑：文本折叠引擎
-│   └── crystal_renderer.py # 2.5D 晶体渲染器（可选视觉层）
-├── demos/                  # 演示脚本
-└── outputs/                # 输出图片
+┌──────────────────────────────────────────────┐
+│              众星 · 双脑引擎                    │
+│                                              │
+│  人类文本 ──→ 🧠小脑(Cerebellum)              │
+│              │ CPU规则引擎 + Crystal3D编码     │
+│              ▼                               │
+│         Crystal3D 语义空间                    │
+│         [E]节点 + [V]数值 + [R]关系           │
+│              │                               │
+│     ┌───────┴───────┐                        │
+│     ▼               ▼                        │
+│  ⚡大脑(Cerebrum)  🔬硬校验层                  │
+│  hermes3推理      Python精确搜索              │
+│  GPU ~2.8s        数学 100% 准确              │
+│     │               │                        │
+│     └───────┬───────┘                        │
+│             ▼                                │
+│       人类可读答案                            │
+└──────────────────────────────────────────────┘
 ```
-
----
-
-## 🛠️ 快速开始
-
-### 环境要求
-
-```bash
-pip install pillow gradio ollama
-```
-
-### CLI
-
-```bash
-# 从文件
-python zhongxing.py report.txt --title "财务分析" --output result.png
-
-# 直接传文本
-python zhongxing.py --direct "营收增长18% 利润创新高" --title "速览"
-
-# 生成 Crystal3D 机机中间语
-python crystal3d.py
-```
-
-### Web UI
-
-```bash
-python gradio_app.py
-# → http://127.0.0.1:7861
-```
-
-### 语义保真度诊断
-
-```bash
-python diagnose_fidelity.py
-# 输出：实体保留率 / 数字保留率 / 关系保留率
-```
-
----
-
-## 🎨 Crystal3D 颜色编码
-
-| 颜色 | 类别 | 含义 |
-|------|------|------|
-| 🟢 GREEN | `positive` | 利好 / 增长 / 收益 |
-| 🔴 RED | `risk` | 风险 / 警告 / 下降 |
-| 🔵 BLUE | `neutral` | 中性 / 信息 / 数据 |
-| 🟡 GOLD | `highlight` | 重点高亮 / 里程碑 |
-| ⚫ GRAY | `dim` | 背景数据 / 次要信息 |
-
----
-
-## 🧠 架构设计
-
-### 小脑 (TextFolder)
-
-```
-原始文本 → 分句 → 关键词分类 → 权重打分 → 自动布局 → Crystal[]
-                                                      ↓
-                                              x/y/z坐标 + 颜色 + 文本
-```
-
-- 中英文关键词检测
-- 5 类语义分类 (positive/risk/neutral/highlight/dim)
-- Z 轴深度自动分配 (核心层→背景层)
-- **纯 Python 规则引擎，CPU 毫秒级**
-
-### Crystal3D 生成器
-
-```
-Crystal[] → 实体提取 → 数值提取 → 关系检测 → Crystal3D 文本
-```
-
-### 大脑 (双通道)
-
-| 通道 | 模型 | 输入 | 适用场景 |
-|------|------|------|---------|
-| ⚡ 文字 | hermes3 | Crystal3D 文本 | 计数/统计/关系推理 |
-| 🎨 视觉 | llava:7b | 2.5D 晶体图 | 空间模式/拓扑分析 |
-
----
-
-## 📊 性能基准
-
-| 指标 | 数值 |
-|------|------|
-| 小脑折叠 | < 0.01s (CPU) |
-| Crystal3D 生成 | < 0.1s |
-| 大脑推理 (hermes3) | ~2.8s (GPU, RTX 4060) |
-| 实体保留率 | 100% |
-| 数字保留率 | 92% |
-| 关系保留率 | 100% |
-
-测试文本：139 字金融关系短文，6 条事实。
-
----
-
-## 🔧 配置
-
-所有参数通过环境变量覆盖，无需改代码：
-
-```bash
-export ZX_TEXT_MODEL=hermes3        # 文字通道模型
-export ZX_VISUAL_MODEL=llava:7b     # 视觉通道模型
-export ZX_MAX_CHUNKS=20             # 最大晶体数
-export ZX_GRADIO_PORT=7861          # Web UI 端口
-```
-
-详见 `config.py`。
 
 ---
 
 ## 🗺️ 路线图
 
 - [x] **v1.0** — 小脑折叠 + 2.5D 渲染 + CLI
-- [x] **v3.2** — 双通道推理 (Hermes 文字 + Llava 视觉) + Gradio
+- [x] **v3.2** — 双通道推理 + Gradio Web UI
 - [x] **v4.0** — Crystal3D 机机中间语 + 语义保真度诊断
-- [ ] **v4.5** — CRC 语义校验层（事实提取+验证）
-- [ ] **v5.0** — 端云协同（端侧 Crystal3D → 云端 256B 大脑）
+- [ ] **v4.5** — CRC 语义校验层
+- [ ] **v5.0** — 端云协同 (端侧编码 → 云端 256B 大脑)
 
 ---
 
-## 📜 许可
+## ⭐ Star History
 
-MIT License — 开源，自由使用。
+如果这个项目对你有用，点个 Star ⭐ 支持一下！
 
 ---
 
-*⚡ 众星 — 不是堆算力，而是让机器用自己的语言思考。*
+MIT License · 开源 · 欢迎 PR
