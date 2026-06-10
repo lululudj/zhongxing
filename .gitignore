@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 输出文件（生成的图片/数据）
+outputs/*.png
+outputs/*.json
+!outputs/.gitkeep
+demos/outputs/*.png
+demos/outputs/*.json
+!demos/outputs/.gitkeep
+
+# 临时/测试文件
+*.tmp
+test_*_sample.txt
+test_semantic_fidelity.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 密钥（绝对不能提交）
+.env
+*.key
+auth.json
