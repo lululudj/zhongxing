@@ -1,13 +1,19 @@
 # ⚡ 众星 · 双脑引擎 (ZhongXing Dual-Brain Engine)
 
-### 端侧双脑推理框架 — Crystal3D 机机中间语
+### 🖥️ 让老设备跑超大模型 · 端侧双脑推理框架
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-4.0-blue" alt="version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
   <img src="https://img.shields.io/badge/python-3.8+-yellow" alt="python">
-  <img src="https://img.shields.io/badge/GPU-RTX%204060-cyan" alt="gpu">
+  <img src="https://img.shields.io/badge/最低配置-GTX%201060-orange" alt="gpu">
 </p>
+
+> **你的老电脑不是不行了，是没遇到对的架构。**
+>
+> GTX 1060 · 8GB 显存 · 老旧笔记本 —— 照样跑百万字长文推理，2.8 秒出结果。
+> 
+> 不用换设备，换个思维方式。
 
 > **实测《斗破苍穹》530万字全文：萧炎 = 52,218 次 · 推理仅需 2.8 秒 · 0 误差**
 >
@@ -21,6 +27,21 @@
 百万字长文 → 🧠小脑折叠 → Crystal3D 语义空间 → ⚡大脑推理 → 精准答案
               CPU 毫秒级      机机中间语            GPU 2.8s      零幻觉
 ```
+
+### 为什么老设备也能跑？
+
+传统方案把百万字全文塞进 GPU 显存 → 至少需要 24GB+ 显存。
+
+众星的做法完全不同：
+
+| | 传统方案 | 众星·双脑 |
+|------|---------|----------|
+| 谁读长文 | GPU 硬扛 | **CPU 规则引擎** |
+| GPU 做什么 | 读全文 + 推理 | **只做推理** |
+| 显存占用 | 24GB+ | **< 4GB** |
+| 最低配置 | RTX 4090 | **GTX 1060** |
+
+> **小脑用 CPU 折叠，大脑用 GPU 推理。各干各的，谁也不浪费。**
 
 **LLM 数数会出错？** 众星在语义空间外面套了一层 **Python 硬校验层**——数字先由代码精确统计，再交给大脑推理。数学 100% 准确。
 
